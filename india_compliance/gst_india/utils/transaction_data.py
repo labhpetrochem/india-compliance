@@ -15,7 +15,7 @@ from india_compliance.gst_india.utils import get_gst_accounts_by_type
 REGEX_MAP = {
     1: re.compile(r"[^A-Za-z0-9]"),
     2: re.compile(r"[^A-Za-z0-9\-\/. ]"),
-    3: re.compile(r"[^A-Za-z0-9@#\-\/,&. ]"),
+    3: re.compile(r"[^A-Za-z0-9@#\-\/,&.(*) ]"),
 }
 
 
