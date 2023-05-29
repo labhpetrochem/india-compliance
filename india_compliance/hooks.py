@@ -17,6 +17,7 @@ boot_session = "india_compliance.boot.set_bootinfo"
 before_uninstall = "india_compliance.uninstall.before_uninstall"
 
 setup_wizard_requires = "assets/india_compliance/js/setup_wizard.js"
+setup_wizard_complete = "india_compliance.gst_india.setup.setup_wizard_complete"
 setup_wizard_stages = "india_compliance.audit_trail.setup.get_setup_wizard_stages"
 
 app_include_js = "india_compliance.bundle.js"
@@ -80,7 +81,7 @@ doc_events = {
             "india_compliance.gst_india.overrides.transaction.validate_transaction"
         ),
     },
-    "Item": {"validate": "india_compliance.gst_india.overrides.item.validate_hsn_code"},
+    "Item": {"validate": "india_compliance.gst_india.overrides.item.validate"},
     "Payment Entry": {
         "validate": (
             "india_compliance.gst_india.overrides.payment_entry.update_place_of_supply"
@@ -107,6 +108,7 @@ doc_events = {
         "onload": "india_compliance.gst_india.overrides.sales_invoice.onload",
         "validate": "india_compliance.gst_india.overrides.sales_invoice.validate",
         "on_submit": "india_compliance.gst_india.overrides.sales_invoice.on_submit",
+        "on_update_after_submit": "india_compliance.gst_india.overrides.sales_invoice.on_update_after_submit",
     },
     "Sales Order": {
         "validate": (
@@ -115,7 +117,7 @@ doc_events = {
     },
     "Supplier": {
         "validate": [
-            "india_compliance.gst_india.overrides.supplier.update_transporter_gstin",
+            "india_compliance.gst_india.overrides.supplier.validate_gst_transporter_id",
             "india_compliance.gst_india.overrides.party.validate_party",
         ],
         "after_insert": (
@@ -159,7 +161,6 @@ regional_overrides = {
         "erpnext.accounts.party.get_regional_address_details": (
             "india_compliance.gst_india.overrides.transaction.update_party_details"
         ),
-        "erpnext.stock.doctype.item.item.set_item_tax_from_hsn_code": "india_compliance.gst_india.overrides.transaction.set_item_tax_from_hsn_code",
         "erpnext.assets.doctype.asset.asset.get_depreciation_amount": (
             "india_compliance.income_tax_india.overrides.asset.get_depreciation_amount"
         ),
