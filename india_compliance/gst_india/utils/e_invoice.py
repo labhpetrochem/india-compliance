@@ -15,16 +15,20 @@ from frappe.utils import (
 
 from india_compliance.gst_india.api_classes.e_invoice import EInvoiceAPI
 from india_compliance.gst_india.constants import (
+    CURRENCY_CODES,
     EXPORT_TYPES,
     GST_CATEGORIES,
-    OVERSEAS_GST_CATEGORIES,
+    PORT_CODES,
 )
 from india_compliance.gst_india.constants.e_invoice import (
     CANCEL_REASON_CODES,
     ITEM_LIMIT,
 )
 from india_compliance.gst_india.utils import (
+    are_goods_supplied,
     is_api_enabled,
+    is_foreign_doc,
+    is_overseas_doc,
     load_doc,
     parse_datetime,
     send_updated_doc,
@@ -92,7 +96,7 @@ def generate_e_invoice(docname, throw=True):
     doc = load_doc("Sales Invoice", docname, "submit")
 
     try:
-        data = EInvoiceData(doc).get_data(for_auto_generation=not throw)
+        data = EInvoiceData(doc).get_data()
         api = EInvoiceAPI(doc)
         result = api.generate_irn(data)
 
@@ -105,6 +109,8 @@ def generate_e_invoice(docname, throw=True):
             result = result.Desc if response.error_code == "2283" else response
 
     except frappe.ValidationError as e:
+        doc.db_set({"einvoice_status": "Failed"})
+
         if throw:
             raise e
 
@@ -117,7 +123,12 @@ def generate_e_invoice(docname, throw=True):
             _("Warning"),
             indicator="yellow",
         )
+
         return
+
+    except Exception as e:
+        doc.db_set({"einvoice_status": "Failed"})
+        raise e
 
     doc.db_set(
         {
@@ -251,10 +262,8 @@ def validate_e_invoice_applicability(doc, gst_settings=None, throw=True):
     if not validate_non_gst_items(doc, throw=throw):
         return
 
-    if doc.gst_category == "Unregistered":
-        return _throw(
-            _("e-Invoice is not applicable for invoices with Unregistered Customers")
-        )
+    if not (doc.place_of_supply == "96-Other Countries" or doc.billing_address_gstin):
+        return _throw(_("e-Invoice is not applicable for B2C invoices"))
 
     if not gst_settings:
         gst_settings = frappe.get_cached_doc("GST Settings")
@@ -311,11 +320,11 @@ def validate_if_e_invoice_can_be_cancelled(doc):
 
 
 class EInvoiceData(GSTTransactionData):
-    def get_data(self, *, for_auto_generation=False):
+    def get_data(self):
         self.validate_transaction()
         self.set_transaction_details()
         self.set_item_list()
-        self.set_transporter_details(for_auto_generation)
+        self.set_transporter_details()
         self.set_party_address_details()
         return self.sanitize_data(self.get_invoice_data())
 
@@ -441,17 +450,17 @@ class EInvoiceData(GSTTransactionData):
 
     def get_supply_type(self):
         supply_type = GST_CATEGORIES[self.doc.gst_category]
-        if self.doc.gst_category in OVERSEAS_GST_CATEGORIES:
+        if is_overseas_doc(self.doc):
             supply_type = f"{supply_type}{EXPORT_TYPES[self.doc.is_export_with_gst]}"
 
         return supply_type
 
-    def set_transporter_details(self, for_auto_generation=False):
+    def set_transporter_details(self):
         if (
             # e-waybill threshold is not met
             self.transaction_details.grand_total < self.settings.e_waybill_threshold
             # e-waybill auto-generation is disabled by user
-            or (for_auto_generation and not self.settings.auto_generate_e_waybill)
+            or not self.settings.generate_e_waybill_with_e_invoice
         ):
             return
 
@@ -468,7 +477,7 @@ class EInvoiceData(GSTTransactionData):
 
         ship_to_address = (
             self.doc.port_address
-            if (self.doc.gst_category == "Overseas" and self.doc.port_address)
+            if (is_foreign_doc(self.doc) and self.doc.port_address)
             else self.doc.shipping_address_name
         )
 
@@ -493,9 +502,9 @@ class EInvoiceData(GSTTransactionData):
     def get_invoice_data(self):
         if self.sandbox_mode:
             seller = {
-                "gstin": "01AMBPG7773M002",
-                "state_number": "01",
-                "pincode": 193501,
+                "gstin": "02AMBPG7773M002",
+                "state_number": "02",
+                "pincode": 171302,
             }
             self.company_address.update(seller)
             if self.dispatch_address:
@@ -508,7 +517,7 @@ class EInvoiceData(GSTTransactionData):
             )
 
             # For overseas transactions, dummy GSTIN is not needed
-            if self.doc.gst_category != "Overseas":
+            if not is_foreign_doc(self.doc):
                 buyer = {
                     "gstin": "36AMBPG7773M002",
                     "state_number": "36",
@@ -629,6 +638,9 @@ class EInvoiceData(GSTTransactionData):
                 "Stcd": self.shipping_address.state_number,
             }
 
+        if is_foreign_doc(self.doc):
+            invoice_data["ExpDtls"] = self.get_export_details()
+
         return invoice_data
 
     def get_item_data(self, item_details):
@@ -658,3 +670,23 @@ class EInvoiceData(GSTTransactionData):
                 "ExpDt": item_details.batch_expiry_date,
             },
         }
+
+    def get_export_details(self):
+        export_details = {"CntCode": self.billing_address.country_code}
+
+        currency = self.doc.currency and self.doc.currency.upper()
+        if currency != "INR" and currency in CURRENCY_CODES:
+            export_details["ForCur"] = currency
+
+        if not are_goods_supplied(self.doc):
+            return export_details
+
+        export_details["ShipBNo"] = self.doc.shipping_bill_number
+        export_details["ShipBDt"] = format_date(
+            self.doc.shipping_bill_date, self.DATE_FORMAT
+        )
+
+        if self.doc.port_code in PORT_CODES:
+            export_details["Port"] = self.doc.port_code
+
+        return export_details
