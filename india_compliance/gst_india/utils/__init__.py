@@ -9,7 +9,6 @@ from frappe.utils import cint, cstr, get_datetime, get_link_to_form, get_system_
 
 from india_compliance.gst_india.constants import (
     ABBREVIATIONS,
-    COUNTRY_CODES,
     E_INVOICE_MASTER_CODES_URL,
     GST_ACCOUNT_FIELDS,
     GSTIN_FORMATS,
@@ -76,6 +75,8 @@ def get_gstin_list(party, party_type="Company"):
     Returns a list the party's GSTINs.
     This function doesn't check for permissions since GSTINs are publicly available.
     """
+
+    frappe.has_permission(party_type, doc=party, throw=True)
 
     gstin_list = frappe.get_all(
         "Address",
@@ -209,8 +210,10 @@ def validate_pincode(address):
 
     frappe.throw(
         _(
-            "Postal Code {postal_code} for address {name} is not associated with {state}. Ensure the initial three digits"
-            " of your postal code align correctly with the state as per the <a href='{url}'>e-Invoice Master Codes</a>."
+            "Postal Code {postal_code} for address {name} is not associated with"
+            " {state}. Ensure the initial three digits of your postal code align"
+            " correctly with the state as per the <a href='{url}'>e-Invoice Master"
+            " Codes</a>."
         ).format(
             postal_code=frappe.bold(address.pincode),
             name=(
@@ -378,6 +381,12 @@ def get_all_gst_accounts(company):
     if not company:
         frappe.throw(_("Please set Company first"))
 
+    if not (
+        frappe.has_permission("Account", "read")
+        or frappe.has_permission("Account", "select")
+    ):
+        frappe.throw(_("Not Permitted to select/read Accounts"), frappe.PermissionError)
+
     settings = frappe.get_cached_doc("GST Settings")
 
     accounts_list = []
@@ -392,13 +401,20 @@ def get_all_gst_accounts(company):
     return accounts_list
 
 
-def parse_datetime(value, day_first=False):
+def parse_datetime(value, day_first=False, throw=True):
     """Convert IST string to offset-naive system time"""
 
     if not value:
         return
 
-    parsed = parser.parse(value, dayfirst=day_first)
+    try:
+        parsed = parser.parse(value, dayfirst=day_first)
+    except Exception as e:
+        if not throw:
+            return
+
+        raise e
+
     system_tz = get_system_timezone()
 
     if system_tz == TIMEZONE:
@@ -498,14 +514,11 @@ def get_gst_uom(uom, settings=None):
     return next((k for k, v in UOM_MAP.items() if v == uom), "OTH")
 
 
-def get_place_of_supply_options(*, as_list=False, with_other_countries=False):
+def get_place_of_supply_options(*, as_list=False):
     options = []
 
     for state_name, state_number in STATE_NUMBERS.items():
         options.append(f"{state_number}-{state_name}")
-
-    if with_other_countries:
-        options.append("96-Other Countries")
 
     if as_list:
         return options
@@ -532,7 +545,8 @@ def get_validated_country_code(country):
     if not code:
         frappe.throw(
             _(
-                "Country Code not found for {0}. Please set it as per the <a href='{1}'>e-Invoice Master Codes</a>"
+                "Country Code not found for {0}. Please set it as per the <a"
+                " href='{1}'>e-Invoice Master Codes</a>"
             ).format(
                 frappe.bold(get_link_to_form("Country", country)),
                 E_INVOICE_MASTER_CODES_URL,
@@ -541,10 +555,11 @@ def get_validated_country_code(country):
 
     code = code.upper()
 
-    if code not in COUNTRY_CODES:
+    if len(code) != 2:
         frappe.throw(
             _(
-                "Country Code for {0} ({1}) does not match with the <a href='{2}'>e-Invoice Master Codes</a>"
+                "Country Code for {0} ({1}) must be a 2-letter code. Please set it as per"
+                " the <a href='{2}'>e-Invoice Master Codes</a>"
             ).format(
                 frappe.bold(get_link_to_form("Country", country, country)),
                 frappe.bold(code),

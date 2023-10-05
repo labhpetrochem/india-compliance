@@ -62,7 +62,7 @@ def create_accounting_dimension_fields():
 
 def create_property_setters():
     for property_setter in get_property_setters():
-        frappe.make_property_setter(property_setter)
+        frappe.make_property_setter(property_setter, validate_fields_for_doctype=False)
 
 
 def create_address_template():
@@ -145,6 +145,7 @@ def set_default_gst_settings():
     default_settings = {
         "hsn_wise_tax_breakup": 1,
         "enable_reverse_charge_in_sales": 0,
+        "require_supplier_invoice_no": 1,
         "validate_hsn_code": 1,
         "min_hsn_digits": 6,
         "enable_e_waybill": 1,
@@ -159,6 +160,9 @@ def set_default_gst_settings():
         "e_invoice_applicable_from": nowdate(),
         "autofill_party_info": 1,
         "archive_party_info_days": 7,
+        "validate_gstin_status": 1,
+        "gstin_status_refresh_interval": 30,
+        "enable_retry_e_invoice_generation": 1,
     }
 
     if frappe.conf.developer_mode:

@@ -1,5 +1,8 @@
 frappe.ui.form.on("Sales Invoice", {
     refresh(frm) {
+        if (frm.doc.__onload?.e_invoice_info?.is_generated_in_sandbox_mode)
+            frm.get_field("irn").set_description("Generated in Sandbox Mode");
+
         if (!is_e_invoice_applicable(frm)) return;
 
         if (
@@ -11,8 +14,10 @@ frappe.ui.form.on("Sales Invoice", {
                 () => {
                     frappe.call({
                         method: "india_compliance.gst_india.utils.e_invoice.generate_e_invoice",
-                        args: { docname: frm.doc.name },
-                        callback: () => frm.refresh(),
+                        args: { docname: frm.doc.name, force: true },
+                        callback: () => {
+                            return frm.refresh();
+                        },
                     });
                 },
                 "e-Invoice"
@@ -163,7 +168,8 @@ function is_e_invoice_applicable(frm) {
         frm.doc.docstatus == 1 &&
         frm.doc.company_gstin &&
         frm.doc.company_gstin != frm.doc.billing_address_gstin &&
-        (frm.doc.place_of_supply === "96-Other Countries" || frm.doc.billing_address_gstin) &&
+        (frm.doc.place_of_supply === "96-Other Countries" ||
+            frm.doc.billing_address_gstin) &&
         !frm.doc.items[0].is_non_gst &&
         is_valid_e_invoice_applicability_date(frm)
     );

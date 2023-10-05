@@ -11,6 +11,10 @@ from erpnext.controllers.taxes_and_totals import (
 )
 
 from india_compliance.gst_india.constants import SALES_DOCTYPES, STATE_NUMBERS
+from india_compliance.gst_india.doctype.gstin.gstin import (
+    _validate_gstin_info,
+    get_gstin_status,
+)
 from india_compliance.gst_india.utils import (
     get_all_gst_accounts,
     get_gst_accounts_by_type,
@@ -219,7 +223,8 @@ def validate_gst_accounts(doc, is_sales_transaction=False):
     ):
         _throw(
             _(
-                "Cannot charge GST in Row #{0} since Company GSTIN and Party GSTIN are same"
+                "Cannot charge GST in Row #{0} since Company GSTIN and Party GSTIN are"
+                " same"
             ).format(idx)
         )
 
@@ -324,7 +329,8 @@ def validate_gst_accounts(doc, is_sales_transaction=False):
         if used_accounts and not set(intra_state_accounts[:2]).issubset(used_accounts):
             _throw(
                 _(
-                    "Cannot use only one of CGST or SGST account for intra-state supplies"
+                    "Cannot use only one of CGST or SGST account for intra-state"
+                    " supplies"
                 ),
                 title=_("Invalid GST Accounts"),
             )
@@ -411,7 +417,6 @@ def validate_items(doc):
 def validate_place_of_supply(doc):
     valid_options = get_place_of_supply_options(
         as_list=True,
-        with_other_countries=doc.doctype in SALES_DOCTYPES,
     )
 
     if doc.place_of_supply not in valid_options:
@@ -436,7 +441,8 @@ def validate_place_of_supply(doc):
         frappe.throw(
             _(
                 "GST Category is set to <strong>Overseas</strong> but Place of Supply"
-                " is within India. Shipping Address in India is required for classifing this as B2C."
+                " is within India. Shipping Address in India is required for classifing"
+                " this as B2C."
             ),
             title=_("Invalid Shipping Address"),
         )
@@ -680,7 +686,7 @@ def get_gst_details(party_details, doctype, company, *, update_place_of_supply=F
         is_reverse_charge = frappe.db.get_value(
             "Supplier",
             party_details.supplier,
-            ("is_reverse_charge_applicable as is_reverse_charge"),
+            "is_reverse_charge_applicable as is_reverse_charge",
             as_dict=True,
         )
 
@@ -759,7 +765,9 @@ def get_party_gst_details(party_details, is_sales_transaction):
         "billing_address_gstin" if is_sales_transaction else "supplier_gstin"
     )
 
-    if not (party := party_details.get(party_type.lower())):
+    if not (party := party_details.get(party_type.lower())) or not isinstance(
+        party, str
+    ):
         return
 
     return frappe.db.get_value(
@@ -896,6 +904,19 @@ def set_reverse_charge(doc):
         doc.set("taxes", template)
 
 
+def validate_gstin(gstin, transaction_date):
+    settings = frappe.get_cached_doc("GST Settings")
+    if not settings.validate_gstin_status:
+        return
+
+    gstin_doc = get_gstin_status(gstin, transaction_date)
+
+    if not gstin_doc:
+        return
+
+    _validate_gstin_info(gstin_doc, transaction_date, throw=True)
+
+
 def validate_transaction(doc, method=None):
     if ignore_gst_validations(doc):
         return False
@@ -930,13 +951,14 @@ def validate_transaction(doc, method=None):
 
     if is_sales_transaction := doc.doctype in SALES_DOCTYPES:
         validate_hsn_codes(doc)
+        gstin = doc.billing_address_gstin
     else:
         validate_reverse_charge_transaction(doc)
+        gstin = doc.supplier_gstin
 
-    validate_gst_category(
-        doc.gst_category,
-        doc.billing_address_gstin if is_sales_transaction else doc.supplier_gstin,
-    )
+    validate_gstin(gstin, doc.get("posting_date") or doc.get("transaction_date"))
+
+    validate_gst_category(doc.gst_category, gstin)
 
     valid_accounts = validate_gst_accounts(doc, is_sales_transaction) or ()
     update_taxable_values(doc, valid_accounts)
